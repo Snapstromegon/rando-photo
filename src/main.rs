@@ -24,6 +24,8 @@ struct Args {
     pub final_glob: PathBuf,
     #[clap(long, env = "HTTP_ADDRESS", default_value = "0.0.0.0:3000")]
     pub http_address: String,
+    #[clap(long, env = "MAX_NEWEST_AGE")]
+    pub max_newest_age_seconds: Option<u64>,
 }
 
 #[tokio::main]
@@ -72,6 +74,19 @@ async fn newest_image_handler(Extension(args): Extension<Args>) -> Response {
     let image = newest_image(args.images_path.join(args.fast_glob));
     if let Some(image) = image {
         println!("Image: {:?}", image);
+
+        if let (Some(max_age_seconds), Ok(created)) = (
+            args.max_newest_age_seconds,
+            image.metadata().and_then(|m| m.created()),
+        ) {
+            let now = std::time::SystemTime::now();
+            let age = now.duration_since(created).unwrap().as_secs();
+            if age > max_age_seconds {
+                println!("Image too old: {} seconds", age);
+                return (StatusCode::NOT_FOUND, "Image too old".to_string()).into_response();
+            }
+        }
+
         Redirect::temporary(&format!(
             "/images/{}",
             diff_paths(image, args.images_path)
